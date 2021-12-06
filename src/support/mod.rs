@@ -131,11 +131,13 @@ pub unsafe fn shutdown_llvm() {
     LLVMShutdown()
 }
 
-pub fn load_library_permanently(filename: &str) -> bool {
-    let filename = to_c_str(filename);
+pub fn load_library_permanently(filename: Option<&str>) -> bool {
+    if let Some(filename) = filename {
+        let filename = to_c_str(filename);
 
-    unsafe {
-        LLVMLoadLibraryPermanently(filename.as_ptr()) == 1
+        unsafe { LLVMLoadLibraryPermanently(filename.as_ptr()) == 1 }
+    } else {
+        unsafe { LLVMLoadLibraryPermanently(std::ptr::null()) == 1 }
     }
 }
 
