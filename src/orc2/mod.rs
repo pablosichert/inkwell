@@ -588,6 +588,9 @@ impl MaterializationUnit {
     }
 
     pub fn from_absolute_symbols(mut symbols: SymbolMapPairs) -> Self {
+        for name in symbols.names_iter() {
+            unsafe { name.retain() };
+        }
         unsafe {
             MaterializationUnit::new(LLVMOrcAbsoluteSymbols(symbols.raw_ptr(), symbols.len()))
         }
@@ -1663,6 +1666,10 @@ impl SymbolStringPoolEntry {
         SymbolStringPoolEntry { entry }
     }
 
+    pub(crate) unsafe fn retain(&self) {
+        LLVMOrcRetainSymbolStringPoolEntry(self.entry);
+    }
+
     #[llvm_versions(12.0..=latest)]
     pub fn get_string(&self) -> &CStr {
         unsafe { CStr::from_ptr(LLVMOrcSymbolStringPoolEntryStr(self.entry)) }
@@ -1672,9 +1679,7 @@ impl SymbolStringPoolEntry {
 #[llvm_versions(12.0..=latest)]
 impl Clone for SymbolStringPoolEntry {
     fn clone(&self) -> Self {
-        unsafe {
-            LLVMOrcRetainSymbolStringPoolEntry(self.entry);
-        }
+        unsafe { self.retain() };
         Self { entry: self.entry }
     }
 }
