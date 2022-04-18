@@ -10,17 +10,20 @@ use std::{
 };
 
 use libc::c_void;
+use llvm_sys::error::{LLVMCreateStringError, LLVMErrorRef, LLVMErrorSuccess};
 #[llvm_versions(12.0..=latest)]
 use llvm_sys::orc2::{
     ee::LLVMOrcCreateRTDyldObjectLinkingLayerWithSectionMemoryManager, LLVMJITCSymbolMapPair,
-    LLVMJITEvaluatedSymbol, LLVMJITSymbolFlags, LLVMOrcAbsoluteSymbols, LLVMOrcCSymbolMapPairs,
-    LLVMOrcDisposeMaterializationUnit, LLVMOrcDisposeObjectLayer,
+    LLVMJITEvaluatedSymbol, LLVMJITSymbolFlags, LLVMOrcAbsoluteSymbols, LLVMOrcCLookupSet,
+    LLVMOrcCSymbolMapPairs, LLVMOrcCreateCustomCAPIDefinitionGenerator,
+    LLVMOrcDefinitionGeneratorRef, LLVMOrcDisposeMaterializationUnit, LLVMOrcDisposeObjectLayer,
     LLVMOrcExecutionSessionCreateBareJITDylib, LLVMOrcExecutionSessionCreateJITDylib,
-    LLVMOrcExecutionSessionGetJITDylibByName, LLVMOrcJITDylibClear,
+    LLVMOrcExecutionSessionGetJITDylibByName, LLVMOrcJITDylibAddGenerator, LLVMOrcJITDylibClear,
     LLVMOrcJITDylibCreateResourceTracker, LLVMOrcJITDylibDefine,
-    LLVMOrcJITDylibGetDefaultResourceTracker, LLVMOrcMaterializationUnitRef, LLVMOrcObjectLayerRef,
+    LLVMOrcJITDylibGetDefaultResourceTracker, LLVMOrcJITDylibLookupFlags, LLVMOrcLookupKind,
+    LLVMOrcLookupStateRef, LLVMOrcMaterializationUnitRef, LLVMOrcObjectLayerRef,
     LLVMOrcReleaseResourceTracker, LLVMOrcResourceTrackerRef, LLVMOrcResourceTrackerRemove,
-    LLVMOrcResourceTrackerTransferTo, LLVMOrcRetainSymbolStringPoolEntry,
+    LLVMOrcResourceTrackerTransferTo, LLVMOrcRetainSymbolStringPoolEntry, LLVMOrcSymbolLookupFlags,
     LLVMOrcSymbolStringPoolEntryStr,
 };
 #[llvm_versions(13.0..=latest)]
@@ -277,8 +280,18 @@ impl<'jit> JITDylib<'jit> {
         LLVMError::new(unsafe { LLVMOrcJITDylibClear(self.jit_dylib) })
     }
 
-    pub fn add_generator() {
-        todo!();
+    #[llvm_versions(12.0..=latest)]
+    pub fn add_generator<Generator>(&self, generator: &mut Generator)
+    where
+        Generator: CustomDefinitionGenerator,
+    {
+        let definition_generator = unsafe {
+            LLVMOrcCreateCustomCAPIDefinitionGenerator(
+                <Generator as UnsafeCustomDefinitionGenerator>::try_to_generate,
+                generator as *mut _ as _,
+            )
+        };
+        unsafe { LLVMOrcJITDylibAddGenerator(self.jit_dylib, definition_generator) };
     }
 }
 
@@ -322,6 +335,154 @@ impl Drop for ResourceTracker<'_> {
                 LLVMOrcReleaseResourceTracker(self.rt);
             }
         }
+    }
+}
+
+#[llvm_versions(12.0..=latest)]
+pub trait CustomDefinitionGenerator {
+    fn try_to_generate(
+        &mut self,
+        lookup_kind: LookupKind,
+        dylib: JITDylib,
+        dylib_lookup_flags: JitDylibLookupFlags,
+        symbol_name: SymbolStringPoolEntry,
+        symbol_lookup_flags: SymbolLookupFlags,
+    ) -> Result<MaterializationUnit, String>;
+}
+
+// https://github.com/llvm/llvm-project/blob/llvmorg-12.0.1/llvm/include/llvm/ExecutionEngine/Orc/Core.h#L136-L146
+/// Describes the kind of lookup being performed. The lookup kind is passed to
+/// symbol generators (if they're invoked) to help them determine what
+/// definitions to generate.
+#[llvm_versions(12.0..=latest)]
+#[derive(Debug, Copy, Clone)]
+pub enum LookupKind {
+    /// Lookup is being performed as-if at static link time (e.g. generators
+    /// representing static archives should pull in new definitions).
+    Static,
+    /// Lookup is being performed as-if at runtime (e.g. generators representing
+    /// static archives should not pull in new definitions).
+    Dlsym,
+}
+
+#[llvm_versions(12.0..=latest)]
+impl From<&LLVMOrcLookupKind> for LookupKind {
+    fn from(kind: &LLVMOrcLookupKind) -> Self {
+        match kind {
+            LLVMOrcLookupKind::LLVMOrcLookupKindStatic => Self::Static,
+            LLVMOrcLookupKind::LLVMOrcLookupKindDLSym => Self::Dlsym,
+        }
+    }
+}
+
+// https://github.com/llvm/llvm-project/blob/llvmorg-12.0.1/llvm/include/llvm/ExecutionEngine/Orc/Core.h#L118-L124
+/// Lookup flags that apply to each dylib in the search order for a lookup.
+#[llvm_versions(12.0..=latest)]
+#[derive(Debug, Copy, Clone)]
+pub enum JitDylibLookupFlags {
+    /// Only symbols in the given Dylib's interface will be searched.
+    MatchExportedSymbolsOnly,
+    /// Symbols in the given Dylib's interface as well symbols with hidden visibility will match.
+    MatchAllSymbols,
+}
+
+#[llvm_versions(12.0..=latest)]
+impl From<&LLVMOrcJITDylibLookupFlags> for JitDylibLookupFlags {
+    fn from(flags: &LLVMOrcJITDylibLookupFlags) -> Self {
+        match flags {
+            LLVMOrcJITDylibLookupFlags::LLVMOrcJITDylibLookupFlagsMatchExportedSymbolsOnly => {
+                Self::MatchExportedSymbolsOnly
+            }
+            LLVMOrcJITDylibLookupFlags::LLVMOrcJITDylibLookupFlagsMatchAllSymbols => {
+                Self::MatchAllSymbols
+            }
+        }
+    }
+}
+
+// https://github.com/llvm/llvm-project/blob/llvmorg-12.0.1/llvm/include/llvm/ExecutionEngine/Orc/Core.h#L126-L134
+/// Lookup flags that apply to each symbol in a lookup.
+#[llvm_versions(12.0..=latest)]
+#[derive(Debug, Copy, Clone)]
+pub enum SymbolLookupFlags {
+    /// The symbol must be found during the lookup or the lookup will fail
+    /// returning a `SymbolNotFound` error.
+    RequiredSymbol,
+    /// If the given symbol is not found then the query will continue, and no
+    /// result for the missing symbol will be present in the result (assuming
+    /// the rest of the lookup succeeds).
+    WeaklyReferencedSymbol,
+}
+
+#[llvm_versions(12.0..=latest)]
+impl From<&LLVMOrcSymbolLookupFlags> for SymbolLookupFlags {
+    fn from(flags: &LLVMOrcSymbolLookupFlags) -> Self {
+        match flags {
+            LLVMOrcSymbolLookupFlags::LLVMOrcSymbolLookupFlagsRequiredSymbol => {
+                Self::RequiredSymbol
+            }
+            LLVMOrcSymbolLookupFlags::LLVMOrcSymbolLookupFlagsWeaklyReferencedSymbol => {
+                Self::WeaklyReferencedSymbol
+            }
+        }
+    }
+}
+
+#[llvm_versions(12.0..=latest)]
+trait UnsafeCustomDefinitionGenerator {
+    extern "C" fn try_to_generate(
+        _definition_generator: LLVMOrcDefinitionGeneratorRef,
+        context: *mut c_void,
+        _lookup_state: *mut LLVMOrcLookupStateRef,
+        lookup_kind: LLVMOrcLookupKind,
+        dylib: LLVMOrcJITDylibRef,
+        dylib_lookup_flags: LLVMOrcJITDylibLookupFlags,
+        lookup_set: LLVMOrcCLookupSet,
+        lookup_set_size: usize,
+    ) -> LLVMErrorRef;
+}
+
+#[llvm_versions(12.0..=latest)]
+impl<T> UnsafeCustomDefinitionGenerator for T
+where
+    T: CustomDefinitionGenerator,
+{
+    extern "C" fn try_to_generate(
+        _definition_generator: LLVMOrcDefinitionGeneratorRef,
+        context: *mut c_void,
+        _lookup_state: *mut LLVMOrcLookupStateRef,
+        lookup_kind: LLVMOrcLookupKind,
+        dylib: LLVMOrcJITDylibRef,
+        dylib_lookup_flags: LLVMOrcJITDylibLookupFlags,
+        lookup_set: LLVMOrcCLookupSet,
+        lookup_set_size: usize,
+    ) -> LLVMErrorRef {
+        let generator = unsafe { &mut *(context as *mut T) };
+        for i in 0..lookup_set_size {
+            let item = unsafe { &mut *lookup_set.add(i) };
+            let symbol_name = unsafe { SymbolStringPoolEntry::new(item.Name) };
+            let symbol_lookup_flags = &item.LookupFlags;
+            let materialization_unit = match T::try_to_generate(
+                generator,
+                (&lookup_kind).into(),
+                unsafe { JITDylib::new(dylib) },
+                (&dylib_lookup_flags).into(),
+                symbol_name,
+                symbol_lookup_flags.into(),
+            ) {
+                Ok(unit) => unit,
+                Err(error) => {
+                    return unsafe { LLVMCreateStringError(to_c_str(&error).as_ptr()) };
+                }
+            };
+            let error =
+                unsafe { LLVMOrcJITDylibDefine(dylib, materialization_unit.materialization_unit) };
+            forget(materialization_unit);
+            if !error.is_null() {
+                return error;
+            }
+        }
+        LLVMErrorSuccess as _
     }
 }
 
@@ -1291,10 +1452,12 @@ pub struct SymbolFlags {
 
 #[llvm_versions(12.0..=latest)]
 impl SymbolFlags {
-    pub fn new(generic_flags: u8, target_flags: u8) -> Self {
+    pub fn new(generic_flags: &[SymbolGenericFlag], target_flags: u8) -> Self {
         SymbolFlags {
             flags: LLVMJITSymbolFlags {
-                GenericFlags: generic_flags,
+                GenericFlags: generic_flags
+                    .into_iter()
+                    .fold(0, |flags, flag| flags | *flag as u8),
                 TargetFlags: target_flags,
             },
         }
@@ -1312,7 +1475,12 @@ impl SymbolFlags {
 #[llvm_versions(12.0..=latest)]
 impl Clone for SymbolFlags {
     fn clone(&self) -> Self {
-        SymbolFlags::new(self.flags.GenericFlags, self.flags.TargetFlags)
+        Self {
+            flags: LLVMJITSymbolFlags {
+                GenericFlags: self.flags.GenericFlags,
+                TargetFlags: self.flags.TargetFlags,
+            },
+        }
     }
 }
 
@@ -1324,6 +1492,15 @@ impl fmt::Debug for SymbolFlags {
             .field("target_flags", &self.get_target_flags())
             .finish()
     }
+}
+
+#[llvm_versions(12.0..=latest)]
+#[derive(Debug, Clone, Copy)]
+pub enum SymbolGenericFlag {
+    Exported = 1,
+    Weak = 2,
+    Callable = 4,
+    MaterializationSideEffectsOnly = 8,
 }
 
 #[llvm_versions(12.0..=latest)]

@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     ffi::CStr,
     iter::{self, FromIterator},
     ops::Deref,
@@ -10,7 +10,9 @@ use std::{
 
 #[llvm_versions(12.0..=latest)]
 use inkwell::orc2::{
-    lljit::ObjectLinkingLayerCreator, MaterializationUnit, ObjectLayer, SymbolFlags,
+    lljit::ObjectLinkingLayerCreator, CustomDefinitionGenerator, EvaluatedSymbol,
+    JitDylibLookupFlags, LookupKind, MaterializationUnit, ObjectLayer, SymbolFlags,
+    SymbolGenericFlag, SymbolLookupFlags, SymbolMapPairs,
 };
 #[llvm_versions(13.0..=latest)]
 use inkwell::orc2::{
@@ -462,7 +464,7 @@ impl TestMaterializer<'_, '_> {
             vec!["main", "fourty_two"]
                 .into_iter()
                 .map(|name| lljit.mangle_and_intern(name))
-                .zip(iter::repeat(SymbolFlags::new(0, 0))),
+                .zip(iter::repeat(SymbolFlags::new(&[], 0))),
         )
     }
 }
@@ -503,7 +505,7 @@ fn test_materialization_responsibility_fail_materializing() {
         "test materialization unit",
         SymbolFlagsMapPairs::new(vec![SymbolFlagsMapPair::new(
             lljit.mangle_and_intern("main"),
-            SymbolFlags::new(0, 0),
+            SymbolFlags::new(&[], 0),
         )]),
         None,
         materializer,
@@ -683,6 +685,65 @@ fn test_test_materializer(lljit: &LLJIT, materializer: impl Materializer) {
     }
 }
 
+#[llvm_versions(13.0..=latest)]
+#[test]
+fn test_test_definition_generator() {
+    let lljit = LLJIT::create().unwrap();
+    let context = ThreadSafeContext::create();
+    let builder = ModuleBuilder::new(&context, "simple_generator")
+        .add_function_with_external_function_call("main", "foo");
+    let module = builder.build().unwrap();
+    let main_jit_dylib = lljit.get_main_jit_dylib();
+
+    struct Generator {
+        symbols: HashMap<&'static str, usize>,
+    }
+
+    impl CustomDefinitionGenerator for Generator {
+        fn try_to_generate(
+            &mut self,
+            _lookup_kind: LookupKind,
+            _dylib: JITDylib,
+            _dylib_lookup_flags: JitDylibLookupFlags,
+            symbol_name: SymbolStringPoolEntry,
+            _symbol_lookup_flags: SymbolLookupFlags,
+        ) -> Result<MaterializationUnit, String> {
+            let address = self
+                .symbols
+                .remove(symbol_name.get_string().to_string_lossy().deref())
+                .unwrap();
+            let flags = SymbolFlags::new(
+                &[SymbolGenericFlag::Exported, SymbolGenericFlag::Callable],
+                0,
+            );
+            let symbol = EvaluatedSymbol::new(address as _, flags);
+            let symbols = SymbolMapPairs::from_iter([(symbol_name, symbol)]);
+            Ok(MaterializationUnit::from_absolute_symbols(symbols))
+        }
+    }
+
+    #[inline(never)]
+    #[no_mangle]
+    fn foo() {}
+
+    let function_address = foo as usize;
+    let fun = unsafe { std::mem::transmute::<_, extern "C" fn()>(function_address) };
+    fun();
+
+    let mut generator = Generator {
+        symbols: {
+            let mut symbols = HashMap::new();
+            symbols.insert("_foo", foo as usize);
+            symbols
+        },
+    };
+    main_jit_dylib.add_generator(&mut generator);
+    lljit.add_module(&main_jit_dylib, module).unwrap();
+    let function = unsafe { lljit.get_function::<unsafe extern "C" fn()>("main") }.unwrap();
+    assert!(generator.symbols.is_empty());
+    unsafe { function.call() };
+}
+
 fn test_basic_lljit_functionality(lljit: LLJIT) {
     let thread_safe_context = ThreadSafeContext::create();
     let module = constant_function_module(&thread_safe_context, 64, "main");
@@ -744,6 +805,19 @@ impl<'ctx> ModuleBuilder<'ctx> {
         let value_2 = self.function_call_without_arguments(&builder, value_func_2);
         let sum: IntValue = builder.build_int_add(value_1, value_2, "sum");
         builder.build_return(Some(&sum));
+        self
+    }
+
+    fn add_function_with_external_function_call(self, name: &str, external_name: &str) -> Self {
+        let context = self.thread_safe_context.context();
+        let function_type = context.void_type().fn_type(&[], false);
+        let builder = context.create_builder();
+        let function = self.module.add_function(name, function_type, None);
+        let function_block = context.append_basic_block(function, "entry");
+        builder.position_at_end(function_block);
+        let external_function = self.module.add_function(external_name, function_type, None);
+        builder.build_call(external_function, &[], external_name);
+        builder.build_return(None);
         self
     }
 
