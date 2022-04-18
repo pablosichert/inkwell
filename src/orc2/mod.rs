@@ -1417,8 +1417,8 @@ impl SymbolMapPair {
     pub fn new(name: SymbolStringPoolEntry, symbol: EvaluatedSymbol) -> Self {
         SymbolMapPair {
             pair: LLVMJITCSymbolMapPair {
-                Name: unsafe { transmute(name) },
-                Sym: unsafe { transmute(symbol) },
+                Name: name.entry,
+                Sym: symbol.symbol,
             },
         }
     }
@@ -1465,8 +1465,8 @@ impl EvaluatedSymbol {
     pub fn new(address: u64, flags: SymbolFlags) -> Self {
         EvaluatedSymbol {
             symbol: LLVMJITEvaluatedSymbol {
-                Address: unsafe { transmute(address) },
-                Flags: unsafe { transmute(flags) },
+                Address: address,
+                Flags: flags.flags,
             },
         }
     }
