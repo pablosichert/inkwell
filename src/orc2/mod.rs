@@ -704,6 +704,9 @@ impl<'jit> MaterializationUnit<'jit> {
     }
 
     pub fn from_absolute_symbols(mut symbols: SymbolMapPairs) -> Self {
+        for name in symbols.names_iter() {
+            unsafe { LLVMOrcRetainSymbolStringPoolEntry(name.entry) };
+        }
         unsafe {
             MaterializationUnit::new(LLVMOrcAbsoluteSymbols(symbols.raw_ptr(), symbols.len()))
         }
