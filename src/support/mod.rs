@@ -21,9 +21,7 @@ pub struct LLVMString {
 
 impl LLVMString {
     pub(crate) unsafe fn new(ptr: *const c_char) -> Self {
-        LLVMString {
-            ptr,
-        }
+        LLVMString { ptr }
     }
 
     /// This is a convenience method for creating a Rust `String`,
@@ -37,18 +35,14 @@ impl LLVMString {
 
     /// This method will allocate a c string through LLVM
     pub(crate) fn create_from_c_str(string: &CStr) -> LLVMString {
-        unsafe {
-            LLVMString::new(LLVMCreateMessage(string.as_ptr() as *const _))
-        }
+        unsafe { LLVMString::new(LLVMCreateMessage(string.as_ptr() as *const _)) }
     }
 
     /// This method will allocate a c string through LLVM
     pub(crate) fn create_from_str(string: &str) -> LLVMString {
         debug_assert_eq!(string.as_bytes()[string.as_bytes().len() - 1], 0);
 
-        unsafe {
-            LLVMString::new(LLVMCreateMessage(string.as_ptr() as *const _))
-        }
+        unsafe { LLVMString::new(LLVMCreateMessage(string.as_ptr() as *const _)) }
     }
 }
 
@@ -56,9 +50,7 @@ impl Deref for LLVMString {
     type Target = CStr;
 
     fn deref(&self) -> &Self::Target {
-        unsafe {
-            CStr::from_ptr(self.ptr)
-        }
+        unsafe { CStr::from_ptr(self.ptr) }
     }
 }
 
@@ -82,7 +74,8 @@ impl PartialEq for LLVMString {
 
 impl Error for LLVMString {
     fn description(&self) -> &str {
-        self.to_str().expect("Could not convert LLVMString to str (likely invalid unicode)")
+        self.to_str()
+            .expect("Could not convert LLVMString to str (likely invalid unicode)")
     }
 
     fn cause(&self) -> Option<&dyn Error> {
@@ -149,9 +142,7 @@ impl Debug for LLVMStringOrRaw<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self.string {
             OwnedOrBorrowedPtr::Owned(..) => f.debug_tuple("Owned").field(&self.as_str()).finish(),
-            OwnedOrBorrowedPtr::Borrowed(..) => {
-                f.debug_tuple("Borrowed").field(&self.as_str()).finish()
-            }
+            OwnedOrBorrowedPtr::Borrowed(..) => f.debug_tuple("Borrowed").field(&self.as_str()).finish(),
         }
     }
 }
@@ -254,9 +245,7 @@ pub unsafe fn shutdown_llvm() {
 pub fn load_library_permanently(filename: &str) -> bool {
     let filename = to_c_str(filename);
 
-    unsafe {
-        LLVMLoadLibraryPermanently(filename.as_ptr()) == 1
-    }
+    unsafe { LLVMLoadLibraryPermanently(filename.as_ptr()) == 1 }
 }
 
 /// Determines whether or not LLVM has been configured to run in multithreaded mode. (Inkwell currently does
@@ -264,9 +253,7 @@ pub fn load_library_permanently(filename: &str) -> bool {
 pub fn is_multithreaded() -> bool {
     use llvm_sys::core::LLVMIsMultithreaded;
 
-    unsafe {
-        LLVMIsMultithreaded() == 1
-    }
+    unsafe { LLVMIsMultithreaded() == 1 }
 }
 
 pub fn enable_llvm_pretty_stack_trace() {
@@ -275,9 +262,7 @@ pub fn enable_llvm_pretty_stack_trace() {
     #[llvm_versions(3.8..=latest)]
     use llvm_sys::error_handling::LLVMEnablePrettyStackTrace;
 
-    unsafe {
-        LLVMEnablePrettyStackTrace()
-    }
+    unsafe { LLVMEnablePrettyStackTrace() }
 }
 
 /// This function takes in a Rust string and either:
@@ -295,9 +280,7 @@ pub(crate) fn to_c_str<'s>(mut s: &'s str) -> Cow<'s, CStr> {
         return Cow::from(CString::new(s).expect("unreachable since null bytes are checked"));
     }
 
-    unsafe {
-        Cow::from(CStr::from_ptr(s.as_ptr() as *const _))
-    }
+    unsafe { Cow::from(CStr::from_ptr(s.as_ptr() as *const _)) }
 }
 
 #[test]

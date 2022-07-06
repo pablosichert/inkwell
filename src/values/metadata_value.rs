@@ -1,19 +1,25 @@
-use llvm_sys::core::{LLVMIsAMDNode, LLVMIsAMDString, LLVMGetMDString, LLVMGetMDNodeNumOperands, LLVMGetMDNodeOperands};
+use llvm_sys::core::{
+    LLVMGetMDNodeNumOperands, LLVMGetMDNodeOperands, LLVMGetMDString, LLVMIsAMDNode, LLVMIsAMDString,
+};
 use llvm_sys::prelude::LLVMValueRef;
 
 #[llvm_versions(7.0..=latest)]
-use llvm_sys::prelude::LLVMMetadataRef;
-#[llvm_versions(7.0..=latest)]
 use llvm_sys::core::LLVMValueAsMetadata;
+#[llvm_versions(7.0..=latest)]
+use llvm_sys::prelude::LLVMMetadataRef;
 
-use crate::support::LLVMString;
 use crate::values::traits::AsValueRef;
 use crate::values::{BasicMetadataValueEnum, Value};
 
-use std::ffi::CStr;
-use std::fmt;
+use super::AnyValue;
 
-// TODOC: Varies by version
+use std::ffi::CStr;
+use std::fmt::{self, Display};
+
+// FIXME: use #[doc(cfg(...))] for this rustdoc comment when it's stabilized:
+// https://github.com/rust-lang/rust/issues/43781
+/// Value returned by [`Context::get_kind_id()`](crate::context::Context::get_kind_id)
+/// for the first input string that isn't known. Each LLVM version has a different set of pre-defined metadata kinds.
 #[cfg(feature = "llvm3-6")]
 pub const FIRST_CUSTOM_METADATA_KIND_ID: u32 = 12;
 #[cfg(feature = "llvm3-7")]
@@ -40,6 +46,8 @@ pub const FIRST_CUSTOM_METADATA_KIND_ID: u32 = 30;
 pub const FIRST_CUSTOM_METADATA_KIND_ID: u32 = 31;
 #[cfg(feature = "llvm13-0")]
 pub const FIRST_CUSTOM_METADATA_KIND_ID: u32 = 31;
+#[cfg(feature = "llvm14-0")]
+pub const FIRST_CUSTOM_METADATA_KIND_ID: u32 = 31;
 
 #[derive(PartialEq, Eq, Clone, Copy, Hash)]
 pub struct MetadataValue<'ctx> {
@@ -58,23 +66,17 @@ impl<'ctx> MetadataValue<'ctx> {
 
     #[llvm_versions(7.0..=latest)]
     pub(crate) fn as_metadata_ref(self) -> LLVMMetadataRef {
-        unsafe {
-            LLVMValueAsMetadata(self.as_value_ref())
-        }
+        unsafe { LLVMValueAsMetadata(self.as_value_ref()) }
     }
 
     // SubTypes: This can probably go away with subtypes
     pub fn is_node(self) -> bool {
-        unsafe {
-            LLVMIsAMDNode(self.as_value_ref()) == self.as_value_ref()
-        }
+        unsafe { LLVMIsAMDNode(self.as_value_ref()) == self.as_value_ref() }
     }
 
     // SubTypes: This can probably go away with subtypes
     pub fn is_string(self) -> bool {
-        unsafe {
-            LLVMIsAMDString(self.as_value_ref()) == self.as_value_ref()
-        }
+        unsafe { LLVMIsAMDString(self.as_value_ref()) == self.as_value_ref() }
     }
 
     pub fn get_string_value(&self) -> Option<&CStr> {
@@ -83,9 +85,7 @@ impl<'ctx> MetadataValue<'ctx> {
         }
 
         let mut len = 0;
-        let c_str = unsafe {
-            CStr::from_ptr(LLVMGetMDString(self.as_value_ref(), &mut len))
-        };
+        let c_str = unsafe { CStr::from_ptr(LLVMGetMDString(self.as_value_ref(), &mut len)) };
 
         Some(c_str)
     }
@@ -96,9 +96,7 @@ impl<'ctx> MetadataValue<'ctx> {
             return 0;
         }
 
-        unsafe {
-            LLVMGetMDNodeNumOperands(self.as_value_ref())
-        }
+        unsafe { LLVMGetMDNodeNumOperands(self.as_value_ref()) }
     }
 
     // SubTypes: Node only one day
@@ -123,10 +121,6 @@ impl<'ctx> MetadataValue<'ctx> {
             .collect()
     }
 
-    pub fn print_to_string(self) -> LLVMString {
-        self.metadata_value.print_to_string()
-    }
-
     pub fn print_to_stderr(self) {
         self.metadata_value.print_to_stderr()
     }
@@ -139,6 +133,12 @@ impl<'ctx> MetadataValue<'ctx> {
 impl AsValueRef for MetadataValue<'_> {
     fn as_value_ref(&self) -> LLVMValueRef {
         self.metadata_value.value
+    }
+}
+
+impl Display for MetadataValue<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.print_to_string())
     }
 }
 

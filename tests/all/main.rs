@@ -20,17 +20,22 @@ mod test_context;
 )))]
 mod test_debug_info;
 mod test_execution_engine;
+mod test_instruction_conversion;
 mod test_instruction_values;
 mod test_intrinsics;
 mod test_module;
 mod test_object_file;
 #[cfg(all(
     feature = "orc2",
-    any(feature = "llvm11-0", feature = "llvm12-0", feature = "llvm13-0")
+    any(
+        feature = "llvm11-0",
+        feature = "llvm12-0",
+        feature = "llvm13-0",
+        feature = "llvm14-0"
+    )
 ))]
 mod test_orc2;
 mod test_passes;
-mod test_phi_conversion;
 mod test_targets;
 mod test_tari_example;
 mod test_types;

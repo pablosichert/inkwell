@@ -1,11 +1,12 @@
-use std::convert::TryFrom;
 use either::Either;
+use std::convert::TryFrom;
+use std::fmt::{self, Display};
 
 use crate::values::AsValueRef;
-use crate::values::{FunctionValue, PointerValue, AnyValue};
+use crate::values::{AnyValue, FunctionValue, PointerValue};
 
+use llvm_sys::core::{LLVMGetElementType, LLVMGetReturnType, LLVMGetTypeKind, LLVMTypeOf};
 use llvm_sys::prelude::LLVMValueRef;
-use llvm_sys::core::{LLVMGetTypeKind, LLVMGetElementType, LLVMTypeOf, LLVMGetReturnType};
 use llvm_sys::LLVMTypeKind;
 
 /// A value that can be called with the [`build_call`] instruction.
@@ -91,9 +92,8 @@ impl<'ctx> AnyValue<'ctx> for CallableValue<'ctx> {}
 
 impl<'ctx> CallableValue<'ctx> {
     pub(crate) fn returns_void(&self) -> bool {
-        let return_type = unsafe {
-            LLVMGetTypeKind(LLVMGetReturnType(LLVMGetElementType(LLVMTypeOf(self.as_value_ref()))))
-        };
+        let return_type =
+            unsafe { LLVMGetTypeKind(LLVMGetReturnType(LLVMGetElementType(LLVMTypeOf(self.as_value_ref())))) };
 
         matches!(return_type, LLVMTypeKind::LLVMVoidTypeKind)
     }
@@ -119,5 +119,11 @@ impl<'ctx> TryFrom<PointerValue<'ctx>> for CallableValue<'ctx> {
         } else {
             Err(())
         }
+    }
+}
+
+impl Display for CallableValue<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.print_to_string())
     }
 }

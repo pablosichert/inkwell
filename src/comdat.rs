@@ -2,8 +2,11 @@
 // https://llvm.org/doxygen/IR_2Comdat_8h_source.html
 // https://stackoverflow.com/questions/1834597/what-is-the-comdat-section-used-for
 
-use llvm_sys::comdat::{LLVMComdatSelectionKind, LLVMSetComdatSelectionKind, LLVMGetComdatSelectionKind};
+use llvm_sys::comdat::{LLVMComdatSelectionKind, LLVMGetComdatSelectionKind, LLVMSetComdatSelectionKind};
 use llvm_sys::prelude::LLVMComdatRef;
+
+#[cfg(feature = "internal-getters")]
+use crate::LLVMReference;
 
 #[llvm_enum(LLVMComdatSelectionKind)]
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -39,17 +42,20 @@ impl Comdat {
 
     /// Gets what kind of `Comdat` this is.
     pub fn get_selection_kind(self) -> ComdatSelectionKind {
-        let kind_ptr = unsafe {
-            LLVMGetComdatSelectionKind(self.0)
-        };
+        let kind_ptr = unsafe { LLVMGetComdatSelectionKind(self.0) };
 
         ComdatSelectionKind::new(kind_ptr)
     }
 
     /// Sets what kind of `Comdat` this should be.
     pub fn set_selection_kind(self, kind: ComdatSelectionKind) {
-        unsafe {
-            LLVMSetComdatSelectionKind(self.0, kind.into())
-        }
+        unsafe { LLVMSetComdatSelectionKind(self.0, kind.into()) }
+    }
+}
+
+#[cfg(feature = "internal-getters")]
+impl LLVMReference<LLVMComdatRef> for Comdat {
+    unsafe fn get_ref(&self) -> LLVMComdatRef {
+        self.0
     }
 }

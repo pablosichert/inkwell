@@ -1,15 +1,20 @@
-use llvm_sys::core::{LLVMConstInt, LLVMConstAllOnes, LLVMGetIntTypeWidth, LLVMConstIntOfStringAndSize, LLVMConstIntOfArbitraryPrecision, LLVMConstArray};
+use llvm_sys::core::{
+    LLVMConstAllOnes, LLVMConstArray, LLVMConstInt, LLVMConstIntOfArbitraryPrecision, LLVMConstIntOfStringAndSize,
+    LLVMGetIntTypeWidth,
+};
 use llvm_sys::execution_engine::LLVMCreateGenericValueOfInt;
 use llvm_sys::prelude::{LLVMTypeRef, LLVMValueRef};
 
-use crate::AddressSpace;
 use crate::context::ContextRef;
+use crate::support::LLVMString;
 use crate::types::traits::AsTypeRef;
-use crate::types::{Type, ArrayType, BasicTypeEnum, VectorType, PointerType, FunctionType};
-use crate::values::{AsValueRef, ArrayValue, GenericValue, IntValue};
+use crate::types::{ArrayType, FunctionType, PointerType, Type, VectorType};
+use crate::values::{ArrayValue, AsValueRef, GenericValue, IntValue};
+use crate::AddressSpace;
 
-use std::convert::TryFrom;
 use crate::types::enums::BasicMetadataTypeEnum;
+use std::convert::TryFrom;
+use std::fmt::{self, Display};
 
 /// How to interpret a string or digits used to construct an integer constant.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -92,9 +97,7 @@ impl<'ctx> IntType<'ctx> {
     /// ```
     // TODOC: Maybe better explain sign extension
     pub fn const_int(self, value: u64, sign_extend: bool) -> IntValue<'ctx> {
-        unsafe {
-            IntValue::new(LLVMConstInt(self.as_type_ref(), value, sign_extend as i32))
-        }
+        unsafe { IntValue::new(LLVMConstInt(self.as_type_ref(), value, sign_extend as i32)) }
     }
 
     /// Create an `IntValue` from a string and radix. LLVM provides no error handling here,
@@ -127,7 +130,7 @@ impl<'ctx> IntType<'ctx> {
     /// ```
     pub fn const_int_from_string(self, slice: &str, radix: StringRadix) -> Option<IntValue<'ctx>> {
         if !radix.matches_str(slice) {
-            return None
+            return None;
         }
 
         unsafe {
@@ -153,7 +156,11 @@ impl<'ctx> IntType<'ctx> {
     /// ```
     pub fn const_int_arbitrary_precision(self, words: &[u64]) -> IntValue<'ctx> {
         unsafe {
-            IntValue::new(LLVMConstIntOfArbitraryPrecision(self.as_type_ref(), words.len() as u32, words.as_ptr()))
+            IntValue::new(LLVMConstIntOfArbitraryPrecision(
+                self.as_type_ref(),
+                words.len() as u32,
+                words.as_ptr(),
+            ))
         }
     }
 
@@ -169,9 +176,7 @@ impl<'ctx> IntType<'ctx> {
     /// let i32_ptr_value = i32_type.const_all_ones();
     /// ```
     pub fn const_all_ones(self) -> IntValue<'ctx> {
-        unsafe {
-            IntValue::new(LLVMConstAllOnes(self.as_type_ref()))
-        }
+        unsafe { IntValue::new(LLVMConstAllOnes(self.as_type_ref())) }
     }
 
     /// Creates a constant zero value of this `IntType`.
@@ -189,9 +194,7 @@ impl<'ctx> IntType<'ctx> {
     /// assert_eq!(i8_zero.print_to_string().to_string(), "i8 0");
     /// ```
     pub fn const_zero(self) -> IntValue<'ctx> {
-        unsafe {
-            IntValue::new(self.int_type.const_zero())
-        }
+        unsafe { IntValue::new(self.int_type.const_zero()) }
     }
 
     /// Creates a `FunctionType` with this `IntType` for its return type.
@@ -321,9 +324,12 @@ impl<'ctx> IntType<'ctx> {
     /// assert_eq!(bool_type.get_bit_width(), 1);
     /// ```
     pub fn get_bit_width(self) -> u32 {
-        unsafe {
-            LLVMGetIntTypeWidth(self.as_type_ref())
-        }
+        unsafe { LLVMGetIntTypeWidth(self.as_type_ref()) }
+    }
+
+    /// Print the definition of an `IntType` to `LLVMString`.
+    pub fn print_to_string(self) -> LLVMString {
+        self.int_type.print_to_string()
     }
 
     // See Type::print_to_stderr note on 5.0+ status
@@ -347,16 +353,12 @@ impl<'ctx> IntType<'ctx> {
     /// assert!(i8_undef.is_undef());
     /// ```
     pub fn get_undef(self) -> IntValue<'ctx> {
-        unsafe {
-            IntValue::new(self.int_type.get_undef())
-        }
+        unsafe { IntValue::new(self.int_type.get_undef()) }
     }
 
     /// Creates a `GenericValue` for use with `ExecutionEngine`s.
     pub fn create_generic_value(self, value: u64, is_signed: bool) -> GenericValue<'ctx> {
-        unsafe {
-            GenericValue::new(LLVMCreateGenericValueOfInt(self.as_type_ref(), value, is_signed as i32))
-        }
+        unsafe { GenericValue::new(LLVMCreateGenericValueOfInt(self.as_type_ref(), value, is_signed as i32)) }
     }
 
     /// Creates a constant `ArrayValue`.
@@ -374,11 +376,13 @@ impl<'ctx> IntType<'ctx> {
     /// assert!(i8_array.is_const());
     /// ```
     pub fn const_array(self, values: &[IntValue<'ctx>]) -> ArrayValue<'ctx> {
-        let mut values: Vec<LLVMValueRef> = values.iter()
-                                                  .map(|val| val.as_value_ref())
-                                                  .collect();
+        let mut values: Vec<LLVMValueRef> = values.iter().map(|val| val.as_value_ref()).collect();
         unsafe {
-            ArrayValue::new(LLVMConstArray(self.as_type_ref(), values.as_mut_ptr(), values.len() as u32))
+            ArrayValue::new(LLVMConstArray(
+                self.as_type_ref(),
+                values.as_mut_ptr(),
+                values.len() as u32,
+            ))
         }
     }
 }
@@ -386,5 +390,11 @@ impl<'ctx> IntType<'ctx> {
 impl AsTypeRef for IntType<'_> {
     fn as_type_ref(&self) -> LLVMTypeRef {
         self.int_type.ty
+    }
+}
+
+impl Display for IntType<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.print_to_string())
     }
 }

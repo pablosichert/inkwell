@@ -1,10 +1,13 @@
 use llvm_sys::prelude::LLVMValueRef;
 
 use std::ffi::CStr;
+use std::fmt::{self, Display};
 
 use crate::types::StructType;
 use crate::values::traits::AsValueRef;
 use crate::values::{InstructionValue, Value};
+
+use super::AnyValue;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
 pub struct StructValue<'ctx> {
@@ -27,9 +30,7 @@ impl<'ctx> StructValue<'ctx> {
     }
 
     pub fn get_type(self) -> StructType<'ctx> {
-        unsafe {
-            StructType::new(self.struct_value.get_type())
-        }
+        unsafe { StructType::new(self.struct_value.get_type()) }
     }
 
     pub fn is_null(self) -> bool {
@@ -56,5 +57,11 @@ impl<'ctx> StructValue<'ctx> {
 impl AsValueRef for StructValue<'_> {
     fn as_value_ref(&self) -> LLVMValueRef {
         self.struct_value.value
+    }
+}
+
+impl Display for StructValue<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.print_to_string())
     }
 }
